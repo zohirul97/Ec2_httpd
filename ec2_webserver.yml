@@ -1,0 +1,74 @@
+---
+- hosts: localhost
+  connection: local
+  vars:
+  gather_facts: False
+  vars:
+    keypair: "centos6"
+    instance_type: t2.micro
+    security_group: "default"
+    image: "ami-0dc2d3e4c0f9ebd18"
+    region: us-east-1
+    user_access_key: "Put your access key here"
+    user_secret_key: "Put your secret key here"
+
+  tasks:
+    - name: startup new instance
+      ec2:
+         key_name: "{{ keypair }}"
+         groups: "{{ security_group }}"
+         instance_type: "{{ instance_type }}"
+         image: "{{ image }}"
+         wait: true
+         region: "{{ region }}"
+         assign_public_ip: yes
+         vpc_subnet_id: "subnet-22d1e96f"
+         aws_access_key: "{{ user_access_key }}"
+         aws_secret_key: "{{ user_secret_key }}"
+         termination_protection: no
+         instance_tags:
+           Name: "web-server"
+      register: ec2
+
+    - name: Add new instance to host group
+      add_host:
+        hostname: "{{ item.public_ip }}"
+        groupname: webserver ##create a group in your inventory file##
+        ansible_ssh_host: "{{ item.public_ip }}"
+        ansible_ssh_port: 22
+        ansible_ssh_user: 'ec2-user'
+        ansible_ssh_private_key_file: '/opt/ansible/inventory/centos6.pem' ##Path to your pem key##
+      with_items: '{{ec2.instances}}'
+
+    - name: Wait for SSH to come up
+      wait_for: host={{ item.public_dns_name }} port=22 delay=60 timeout=320 state=started
+      with_items: '{{ec2.instances}}'
+
+- hosts: webserver
+  become: true
+  tasks:
+
+  - name: install httpd
+    yum:
+      name: httpd
+      state: present
+
+  - name: create index.html file for webserver
+    file:
+      path: /var/www/html/index.html
+      state: touch
+      owner: root
+      group: root
+      mode: '0755'
+
+  - name: add a line to index.html file for webserver
+    lineinfile:
+      path: /var/www/html/index.html
+      line: 'My playbook to create a ec2 instance with httpd worked!!!!!'
+      
+
+  - name: start httpd
+    service:
+      name: httpd
+      state: started
+      enabled: yes
